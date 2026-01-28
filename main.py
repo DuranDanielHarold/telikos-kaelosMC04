@@ -2407,7 +2407,7 @@ elif tool_choice == "Extras (Tab 9-17)":
                         )
                         if downloaded_ids:
                                 st.balloons()
-    # --- Tab 12: DSU Report Generator ---
+   # --- Tab 12: DSU Report Generator ---
     with tab12:
         st.title("📋 Tab 12: DSU Report Generator")
 
@@ -3021,7 +3021,205 @@ elif tool_choice == "Extras (Tab 9-17)":
                 st.metric("Total Payment Count", f"{total_cycle_payment_count:,}")
             with col6:
                 total_cycle_payment_balance = filtered_cycle_df['Payment Balance'].sum()
-                st.metric("Total Payment Balance", f"₱{total_cycle_payment_balance:,.2f}") 
+                st.metric("Total Payment Balance", f"₱{total_cycle_payment_balance:,.2f}")
+        
+        # NEW SECTION: Individual Account Details per Cycle and Agent
+        if st.session_state.raw_data_dsu is not None:
+            st.markdown("---")
+            st.subheader("🔍 Individual Account Details")
+            
+            raw_df = st.session_state.raw_data_dsu.copy()
+            raw_df.columns = raw_df.columns.str.strip()
+            
+            # Create two columns for filters
+            filter_col1, filter_col2 = st.columns(2)
+            
+            with filter_col1:
+                # Get unique cycles
+                cycles = raw_df.get('Cycle', pd.Series()).dropna().astype(str).str.strip()
+                unique_cycles = sorted([c for c in cycles.unique() if c != ''])
+                unique_cycles.insert(0, 'All Cycles')
+                
+                selected_cycle = st.selectbox(
+                    "Filter by Cycle:",
+                    options=unique_cycles,
+                    key="account_cycle_filter_dsu"
+                )
+            
+            with filter_col2:
+                # Get unique agents/collectors
+                agents = raw_df.get('Collector', pd.Series()).dropna().astype(str).str.strip()
+                unique_agents = sorted([a for a in agents.unique() if a != ''])
+                unique_agents.insert(0, 'All Agents')
+                
+                selected_agent = st.selectbox(
+                    "Filter by Agent:",
+                    options=unique_agents,
+                    key="account_agent_filter_dsu"
+                )
+            
+            # --- SEPARATE DATA GRID FOR PTPs ---
+            st.markdown("### 💰 Accounts with PTPs")
+            
+            ptp_df = raw_df.copy()
+            
+            # Filter for PTP Amount > 0
+            ptp_mask = ptp_df.get('PTP Amount', pd.Series()).apply(parse_amount_to_float) > 0
+            ptp_df = ptp_df[ptp_mask]
+            
+            # Apply cycle filter
+            if selected_cycle != 'All Cycles':
+                cycle_col = ptp_df.get('Cycle', pd.Series())
+                ptp_df = ptp_df[cycle_col.astype(str).str.strip() == selected_cycle]
+            
+            # Apply agent filter
+            if selected_agent != 'All Agents':
+                collector_col = ptp_df.get('Collector', pd.Series())
+                ptp_df = ptp_df[collector_col.astype(str).str.strip() == selected_agent]
+            
+            # Select relevant columns to display
+            display_columns_ptp = []
+            available_cols_ptp = ptp_df.columns.tolist()
+            
+            priority_cols_ptp = [
+                'Account No.', 'Cycle', 'Collector', 'Product Type', 
+                'Status', 'Call Status', 'Remark Type',
+                'PTP Amount', 'Balance', 'Date', 'Client', 'Talk Time Duration'
+            ]
+            
+            for col in priority_cols_ptp:
+                if col in available_cols_ptp:
+                    display_columns_ptp.append(col)
+            
+            for col in available_cols_ptp:
+                if col not in display_columns_ptp:
+                    display_columns_ptp.append(col)
+            
+            ptp_display_df = ptp_df[display_columns_ptp].copy()
+            
+            # Format currency columns
+            if 'PTP Amount' in ptp_display_df.columns:
+                ptp_display_df['PTP Amount'] = ptp_display_df['PTP Amount'].apply(
+                    lambda x: f"₱{parse_amount_to_float(x):,.2f}" if parse_amount_to_float(x) > 0 else ''
+                )
+            
+            if 'Balance' in ptp_display_df.columns:
+                ptp_display_df['Balance'] = ptp_display_df['Balance'].apply(
+                    lambda x: f"₱{parse_amount_to_float(x):,.2f}" if pd.notna(x) else ''
+                )
+            
+            st.write(f"**Total PTP Records:** {len(ptp_display_df):,}")
+            
+            st.dataframe(
+                ptp_display_df,
+                use_container_width=True,
+                hide_index=True,
+                height=400
+            )
+            
+            # PTP Summary metrics
+            st.markdown("**PTP Summary:**")
+            ptp_sum_col1, ptp_sum_col2, ptp_sum_col3 = st.columns(3)
+            
+            with ptp_sum_col1:
+                unique_ptp_accounts = ptp_df.get('Account No.', pd.Series()).dropna().nunique()
+                st.metric("Unique PTP Accounts", f"{unique_ptp_accounts:,}")
+            
+            with ptp_sum_col2:
+                total_ptp = sum(
+                    parse_amount_to_float(val) 
+                    for val in ptp_df.get('PTP Amount', pd.Series())
+                )
+                st.metric("Total PTP Amount", f"₱{total_ptp:,.2f}")
+            
+            with ptp_sum_col3:
+                total_ptp_balance = sum(
+                    parse_amount_to_float(val) 
+                    for val in ptp_df.get('Balance', pd.Series())
+                )
+                st.metric("Total PTP Balance", f"₱{total_ptp_balance:,.2f}")
+            
+            # --- SEPARATE DATA GRID FOR CLAIM PAIDS ---
+            st.markdown("---")
+            st.markdown("### 💳 Accounts with Claim Paids")
+            
+            claim_df = raw_df.copy()
+            
+            # Filter for Claim Paid Amount > 0
+            claim_mask = claim_df.get('Claim Paid Amount', pd.Series()).apply(parse_amount_to_float) > 0
+            claim_df = claim_df[claim_mask]
+            
+            # Apply cycle filter
+            if selected_cycle != 'All Cycles':
+                cycle_col = claim_df.get('Cycle', pd.Series())
+                claim_df = claim_df[cycle_col.astype(str).str.strip() == selected_cycle]
+            
+            # Apply agent filter
+            if selected_agent != 'All Agents':
+                collector_col = claim_df.get('Collector', pd.Series())
+                claim_df = claim_df[collector_col.astype(str).str.strip() == selected_agent]
+            
+            # Select relevant columns to display
+            display_columns_claim = []
+            available_cols_claim = claim_df.columns.tolist()
+            
+            priority_cols_claim = [
+                'Account No.', 'Cycle', 'Collector', 'Product Type', 
+                'Status', 'Call Status', 'Remark Type',
+                'Claim Paid Amount', 'Balance', 'Date', 'Client', 'Talk Time Duration'
+            ]
+            
+            for col in priority_cols_claim:
+                if col in available_cols_claim:
+                    display_columns_claim.append(col)
+            
+            for col in available_cols_claim:
+                if col not in display_columns_claim:
+                    display_columns_claim.append(col)
+            
+            claim_display_df = claim_df[display_columns_claim].copy()
+            
+            # Format currency columns
+            if 'Claim Paid Amount' in claim_display_df.columns:
+                claim_display_df['Claim Paid Amount'] = claim_display_df['Claim Paid Amount'].apply(
+                    lambda x: f"₱{parse_amount_to_float(x):,.2f}" if parse_amount_to_float(x) > 0 else ''
+                )
+            
+            if 'Balance' in claim_display_df.columns:
+                claim_display_df['Balance'] = claim_display_df['Balance'].apply(
+                    lambda x: f"₱{parse_amount_to_float(x):,.2f}" if pd.notna(x) else ''
+                )
+            
+            st.write(f"**Total Claim Paid Records:** {len(claim_display_df):,}")
+            
+            st.dataframe(
+                claim_display_df,
+                use_container_width=True,
+                hide_index=True,
+                height=400
+            )
+            
+            # Claim Paid Summary metrics
+            st.markdown("**Claim Paid Summary:**")
+            claim_sum_col1, claim_sum_col2, claim_sum_col3 = st.columns(3)
+            
+            with claim_sum_col1:
+                unique_claim_accounts = claim_df.get('Account No.', pd.Series()).dropna().nunique()
+                st.metric("Unique Claim Paid Accounts", f"{unique_claim_accounts:,}")
+            
+            with claim_sum_col2:
+                total_claim = sum(
+                    parse_amount_to_float(val) 
+                    for val in claim_df.get('Claim Paid Amount', pd.Series())
+                )
+                st.metric("Total Claim Paid Amount", f"₱{total_claim:,.2f}")
+            
+            with claim_sum_col3:
+                total_claim_balance = sum(
+                    parse_amount_to_float(val) 
+                    for val in claim_df.get('Balance', pd.Series())
+                )
+                st.metric("Total Claim Paid Balance", f"₱{total_claim_balance:,.2f}") 
     # --- Tab 13: Claim Paid Report ---
     with tab13:
         st.title("💰 Tab 13: Claim Paid Analyzer")
