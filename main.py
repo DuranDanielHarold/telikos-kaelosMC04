@@ -4671,7 +4671,7 @@ elif tool_choice == "Extras (Tab 9-17)":
 
                                 # POSITIVE = any status that starts with or contains POSITIVE
                                 positive_count = volare_df.loc[
-                                    volare_df['Volare Status'].str.contains('POSITIVE', na=False),
+                                    volare_df['Volare Status'].str.contains('POS CLIENT|POSITIVE CLIENT|RPC|POS 3RD PARTY', na=False),
                                     'Count'
                                 ].sum()
 
