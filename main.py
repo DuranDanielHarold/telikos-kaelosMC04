@@ -1484,7 +1484,7 @@ elif tool_choice == "Extras (Tab 9-17)":
         enable_ai = st.checkbox("🤖 Enable AI Analysis (Groq)", value=True, help="Generate AI-powered insights and recommendations")
         detailed_report = st.checkbox("📝 Generate Detailed Report (with Call Type Clustering)")
         hsbc_mode = st.checkbox("🏦 Enable HSBC Mode")
-        uploaded_file2 = st.file_uploader("📥 Upload Excel File for Call Summarizer", type=["xlsx"], key="call_summarizer")
+        uploaded_file2 = st.file_uploader("📥 Upload Excel File for Call Summarizer", type=["xlsx"], key="call_summarizer", accept_multiple_files=true)
 
         if uploaded_file2 is not None:
             try:
