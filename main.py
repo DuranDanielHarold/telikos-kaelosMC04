@@ -1484,16 +1484,25 @@ elif tool_choice == "Extras (Tab 9-17)":
         enable_ai = st.checkbox("🤖 Enable AI Analysis (Groq)", value=True, help="Generate AI-powered insights and recommendations")
         detailed_report = st.checkbox("📝 Generate Detailed Report (with Call Type Clustering)")
         hsbc_mode = st.checkbox("🏦 Enable HSBC Mode")
-        uploaded_file2 = st.file_uploader("📥 Upload Excel File for Call Summarizer", type=["xlsx"], key="call_summarizer", accept_multiple_files=True)
-
-        if uploaded_file2 is not None:
+        uploaded_files = st.file_uploader("📥 Upload Excel File(s) for Call Summarizer", type=["xlsx"], key="call_summarizer", accept_multiple_files=True)
+    
+        if uploaded_files:  # Changed from 'is not None' to just check if list is not empty
             try:
+                # Process multiple files - concatenate them into one dataframe
+                df_list = []
+                for uploaded_file in uploaded_files:
+                    df_temp = pd.read_excel(uploaded_file, engine="openpyxl")
+                    df_list.append(df_temp)
+                
+                # Combine all uploaded files into one dataframe
+                df_combined = pd.concat(df_list, ignore_index=True)
+                
                 if hsbc_mode:
-                    df_hsbc = pd.read_excel(uploaded_file2, engine="openpyxl")
-
+                    df_hsbc = df_combined.copy()
+    
                     # KEEP RAW COPY FOR TOTAL CALLS + UNIQUE ACCOUNT COUNT
                     df_hsbc_raw = df_hsbc.copy()
-
+    
                     # ✅ 1. Make column names unique
                     def make_unique_columns(columns):
                         seen = {}
@@ -1506,9 +1515,9 @@ elif tool_choice == "Extras (Tab 9-17)":
                                 seen[col] = 0
                                 unique_cols.append(col)
                         return unique_cols
-
+    
                     df_hsbc.columns = make_unique_columns(df_hsbc.columns)
-
+    
                     # ✅ 2. Validate essential columns
                     required_cols = ["User", "Duration of the Call", "Disposition Class", "Call Made Date", "Acct Number"]
                     missing = [col for col in required_cols if col not in df_hsbc.columns]
@@ -1516,37 +1525,37 @@ elif tool_choice == "Extras (Tab 9-17)":
                         st.error(f"❌ Missing required columns for HSBC mode: {missing}")
                         st.write("🧾 Columns found in file:", list(df_hsbc.columns))
                         st.stop()
-
+    
                     # ---------- CLEANING DATA (FOR TALK TIME PURPOSES ONLY!) ----------
                     df_hsbc_clean = df_hsbc.dropna(subset=["User", "Duration of the Call", "Disposition Class", "Call Made Date"])
-
+    
                     # Remove zero-talk only for TALK TIME MATH
                     df_hsbc_clean = df_hsbc_clean[df_hsbc_clean["Duration of the Call"].astype(str) != "00:00:00"]
-
+    
                     if len(df_hsbc_clean) == 0:
                         st.warning("⚠️ No valid talk-time data found after filtering.")
                         st.stop()
-
+    
                     # ---------- STANDARDIZE COLUMN NAMES ----------
                     df_hsbc_clean = df_hsbc_clean.rename(columns={
                         "User": "Collector",
                         "Duration of the Call": "Total Talk Time"
                     })
-
+    
                     df_hsbc_raw = df_hsbc_raw.rename(columns={
                         "User": "Collector",
                         "Duration of the Call": "Total Talk Time"
                     })
-
+    
                     # ---------- SAFE DURATION PARSER ----------
                     def convert_duration(duration):
                         if pd.isna(duration):
                             return pd.Timedelta(seconds=0)
-
+    
                         # If Excel exported time as a float (fraction of a day)
                         if isinstance(duration, (int, float)):
                             return pd.to_timedelta(duration, unit="d")
-
+    
                         try:
                             parts = str(duration).split(':')
                             if len(parts) == 3:
@@ -1554,57 +1563,58 @@ elif tool_choice == "Extras (Tab 9-17)":
                                 return pd.Timedelta(hours=h, minutes=m, seconds=s)
                         except:
                             pass
-
+    
                         return pd.Timedelta(seconds=0)
-
+    
                     df_hsbc_clean["Total Talk Time"] = df_hsbc_clean["Total Talk Time"].apply(convert_duration)
                     df_hsbc_clean["Call Made Date"] = pd.to_datetime(df_hsbc_clean["Call Made Date"], errors="coerce")
                     df_hsbc_clean = df_hsbc_clean.dropna(subset=["Total Talk Time", "Call Made Date"])
-
+    
                     # ---------- GROUPING (TALK TIME ONLY) ----------
                     total_talk = (
                         df_hsbc_clean.groupby("Collector", as_index=False)["Total Talk Time"]
                         .sum()
                     )
-
+    
                     df_daily = (
                         df_hsbc_clean.groupby(["Collector", "Call Made Date"], as_index=False)["Total Talk Time"]
                         .sum()
                     )
-
+    
                     avg_daily = (
                         df_daily.groupby("Collector", as_index=False)["Total Talk Time"]
                         .mean()
                         .rename(columns={"Total Talk Time": "Average Daily Talk Time"})
                     )
-
+    
                     # ---------- TOTAL CALLS (INCLUDES ZERO DURATION!) ----------
                     total_calls = (
                         df_hsbc_raw.groupby("Collector", as_index=False)["Disposition Class"]
                         .count()
                         .rename(columns={"Disposition Class": "Total Calls"})
                     )
-
+    
                     # ---------- MERGE TALK TIME + TOTAL CALLS ----------
                     summary_hsbc = (
                         total_talk
                         .merge(total_calls, on="Collector", how="outer")
                         .merge(avg_daily, on="Collector", how="outer")
                     )
-
+    
                     # Format timedelta to HH:MM:SS
                     def fmt(td):
                         if pd.isna(td):
                             return "00:00:00"
                         s = int(td.total_seconds())
                         return f"{s//3600:02d}:{(s%3600)//60:02d}:{s%60:02d}"
-
+    
                     summary_hsbc["Total Talk Time (HH:MM:SS)"] = summary_hsbc["Total Talk Time"].apply(fmt)
                     summary_hsbc["Average Daily Talk Time (HH:MM:SS)"] = summary_hsbc["Average Daily Talk Time"].apply(fmt)
-
+    
                     # ---------- VISUALS ----------
                     st.subheader("🏦 HSBC Mode Summary")
-
+                    st.info(f"📊 Processing {len(uploaded_files)} file(s) with {len(df_combined)} total rows")
+    
                     if not summary_hsbc.empty:
                         top3 = summary_hsbc.sort_values("Total Talk Time", ascending=False).head(3)
                         cols = st.columns(len(top3))
@@ -1614,63 +1624,63 @@ elif tool_choice == "Extras (Tab 9-17)":
                                 value=f"🕒 {row['Total Talk Time (HH:MM:SS)']}",
                                 delta=f"{int(row['Total Calls'])} calls" if pd.notna(row["Total Calls"]) else "0 calls"
                             )
-
+    
                     st.subheader("📞 Total Calls per Collector (HSBC Mode)")
                     st.plotly_chart(px.bar(summary_hsbc, x="Collector", y="Total Calls", text="Total Calls"), use_container_width=True)
-
+    
                     st.subheader("🕒 Total Talk Time per Collector (HSBC Mode)")
                     st.plotly_chart(px.bar(summary_hsbc, x="Collector", y="Total Talk Time", text="Total Talk Time (HH:MM:SS)"), use_container_width=True)
-
+    
                     st.subheader("📅 Average Daily Talk Time per Collector (HSBC Mode)")
                     st.plotly_chart(px.bar(summary_hsbc, x="Collector", y="Average Daily Talk Time", text="Average Daily Talk Time (HH:MM:SS)"), use_container_width=True)
-
+    
                     # ---------- OVERALL KPIs ----------
                     overall_total_calls = df_hsbc_raw.shape[0]  # includes zero duration
                     overall_unique_accounts = df_hsbc_raw["Acct Number"].dropna().nunique()
-
+    
                     # CONNECTED KPI (unique accounts only, no duration filtering)
                     if "System Disposition" in df_hsbc_raw.columns and "Acct Number" in df_hsbc_raw.columns:
-
+    
                         connected_unique_accounts = (
                             df_hsbc_raw[df_hsbc_raw["System Disposition"].astype(str).str.upper() == "CONNECTED"]
                             ["Acct Number"]
                             .dropna()
                             .nunique()
                         )
-
+    
                     else:
                         connected_unique_accounts = 0
                         st.warning("⚠️ Missing 'System Disposition' or 'Acct Number' column.")
-
-
+    
+    
                     # Safe sum of talk time
                     summary_hsbc["Total Talk Time"] = summary_hsbc["Total Talk Time"].fillna(pd.Timedelta(seconds=0))
                     overall_talk_seconds = summary_hsbc["Total Talk Time"].dt.total_seconds().sum()
-
+    
                     def fmt_total(seconds):
                         seconds = int(seconds)
                         return f"{seconds//3600:02d}:{(seconds%3600)//60:02d}:{seconds%60:02d}"
-
+    
                     overall_talk_formatted = fmt_total(overall_talk_seconds)
-
+    
                     # Display KPIs
                     st.subheader("📊 Overall Performance KPIs (HSBC Mode)")
                     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-
+    
                     with kpi1:
                         st.metric("📞 Total Calls (All Collectors)", f"{overall_total_calls:,}")
-
+    
                     with kpi2:
                         st.metric("🕒 Total Talk Time (All Collectors)", overall_talk_formatted)
-
+    
                     with kpi3:
                         st.metric("💼 Total Work Accounts", f"{overall_unique_accounts:,}")
-
+    
                     with kpi4:
                         st.metric("📡 CONNECTED Unique Accounts", f"{connected_unique_accounts:,}")
-
-
-
+    
+    
+    
                     # ---------- AI Analysis ----------
                     if enable_ai:
                         st.divider()
@@ -1684,15 +1694,16 @@ elif tool_choice == "Extras (Tab 9-17)":
                             file_name="hsbc_ai_analysis.txt",
                             mime="text/plain"
                         )
-
+    
                     st.stop()
-
+    
                 # ---------------------------
                 # --- NORMAL MODE LOGIC -----
                 # ---------------------------
-                df_talk = pd.read_excel(uploaded_file2, engine="openpyxl")
+                df_talk = df_combined.copy()
                 
                 st.write("🔍 Debug: Columns found in your file:", list(df_talk.columns))
+                st.info(f"📊 Processing {len(uploaded_files)} file(s) with {len(df_combined)} total rows")
                 
                 # Check for required columns to calculate talk time
                 # We need: Collector (or User), Date, and Duration of the Call
@@ -1765,11 +1776,11 @@ elif tool_choice == "Extras (Tab 9-17)":
                 # Remove invalid entries
                 df_talk = df_talk.dropna(subset=["Total Talk Time", "Call Made Date"])
                 df_talk = df_talk[df_talk["Total Talk Time"] > pd.Timedelta(seconds=0)]
-
+    
                 if len(df_talk) == 0:
                     st.warning("⚠️ No valid data found after filtering. Please check your data format.")
                     st.stop()
-
+    
                 # Calculate metrics
                 total_calls = (
                     df_talk.groupby("Collector", as_index=False).size().rename(columns={"size": "Total Calls"})
@@ -1785,41 +1796,40 @@ elif tool_choice == "Extras (Tab 9-17)":
                     .mean()
                     .rename(columns={"Total Talk Time": "Average Daily Talk Time"})
                 )
-
+    
                 summary_normal = total_talk.merge(total_calls, on="Collector").merge(avg_daily, on="Collector")
-
+    
                 def fmt(td):
                     if pd.isna(td):
                         return "00:00:00"
                     s = int(td.total_seconds())
                     return f"{s//3600:02d}:{(s%3600)//60:02d}:{s%60:02d}"
-
+    
                 summary_normal["Total Talk Time (HH:MM:SS)"] = summary_normal["Total Talk Time"].apply(fmt)
                 summary_normal["Average Daily Talk Time (HH:MM:SS)"] = summary_normal["Average Daily Talk Time"].apply(fmt)
-
+    
                 # ---- Visualization ----
                 st.subheader("📊 Normal Mode Summary")
-
+    
                 if not summary_normal.empty:
                     top3 = summary_normal.sort_values("Total Talk Time", ascending=False).head(3)
                     cols = st.columns(len(top3))
-                    # FIX: Use enumerate to get proper index
                     for idx, (_, row) in enumerate(top3.iterrows()):
                         cols[idx].metric(
                             label=row["Collector"],
                             value=f"🕒 {row['Total Talk Time (HH:MM:SS)']}",
                             delta=f"{row['Total Calls']} calls"
                         )
-
+    
                 st.subheader("📞 Total Calls per Collector")
                 st.plotly_chart(px.bar(summary_normal, x="Collector", y="Total Calls", text="Total Calls"), use_container_width=True)
-
+    
                 st.subheader("🕒 Total Talk Time per Collector")
                 st.plotly_chart(px.bar(summary_normal, x="Collector", y="Total Talk Time", text="Total Talk Time (HH:MM:SS)"), use_container_width=True)
-
+    
                 st.subheader("📅 Average Daily Talk Time per Collector")
                 st.plotly_chart(px.bar(summary_normal, x="Collector", y="Average Daily Talk Time", text="Average Daily Talk Time (HH:MM:SS)"), use_container_width=True)
-
+    
                 with st.expander("📋 Detailed Table", expanded=False):
                     st.dataframe(summary_normal[["Collector", "Total Calls", "Total Talk Time (HH:MM:SS)", "Average Daily Talk Time (HH:MM:SS)"]])
                 
@@ -1845,13 +1855,14 @@ elif tool_choice == "Extras (Tab 9-17)":
                         file_name="call_center_ai_analysis.txt",
                         mime="text/plain"
                     )
-
+    
             except Exception as e:
                 st.error(f"❌ Error processing Call Summarizer: {e}")
                 st.info("Please make sure your Excel file contains the correct columns for the selected mode.")
-                st.write("Debug info - Columns found in your file:", list(pd.read_excel(uploaded_file2, engine="openpyxl").columns))
+                if uploaded_files:
+                    st.write("Debug info - Columns found in your file:", list(pd.read_excel(uploaded_files[0], engine="openpyxl").columns))
         else:
-            st.info("⚠️ Please upload an Excel file for Call Summarizer.")
+            st.info("⚠️ Please upload one or more Excel files for Call Summarizer.")
     
     # --- Tab 10: Daily Performance Analyzer ---
     with tab10:
